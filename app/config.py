@@ -19,6 +19,24 @@ MODEL_CATALOG: dict[str, str] = {
     'anthropic/claude-opus-5-5': 'Claude Opus 5.5',
     'fireworks_ai/glm-5p3': 'GLM-5.3',
 }
+LOOPBACK_HOSTS = {'localhost', '127.0.0.1', '::1'}
+
+
+def oidc_endpoint_allowed(value: str, *, back_channel: bool = False) -> bool:
+    """HTTPS, or plain HTTP to a local identity provider during development.
+
+    Browser-facing URLs allow HTTP only on loopback. Server-to-provider calls may
+    also use a private single-label or `.internal` name, such as a Compose service.
+    """
+    parsed = urlsplit(value)
+    host = parsed.hostname or ''
+    if (not host or parsed.username or parsed.password or parsed.fragment
+            or any(char in value for char in '\r\n\t ')):
+        return False
+    if parsed.scheme == 'https':
+        return True
+    local = host in LOOPBACK_HOSTS or (back_channel and ('.' not in host or host.endswith('.internal')))
+    return parsed.scheme == 'http' and local
 
 
 class Settings(BaseSettings):
@@ -160,6 +178,30 @@ class Settings(BaseSettings):
             raise ValueError('Only exact automation webhook paths can be exempted from Access.')
         return self
 
+    @model_validator(mode='after')
+    def validate_oidc(self):
+        values = (self.oidc_issuer, self.oidc_client_id, self.oidc_client_secret)
+        if any(values) and not all(values):
+            raise ValueError('Configure OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET together.')
+        if any(char in value for value in (*values, self.oidc_display_name) for char in '\r\n'):
+            raise ValueError('OIDC configuration cannot contain line breaks.')
+        if self.oidc_issuer and (not oidc_endpoint_allowed(self.oidc_issuer) or urlsplit(self.oidc_issuer).query):
+            raise ValueError('OIDC_ISSUER must be an HTTPS URL, or HTTP on loopback for local development.')
+        if self.oidc_discovery_url and (not self.oidc_issuer
+                                        or not oidc_endpoint_allowed(self.oidc_discovery_url, back_channel=True)):
+            raise ValueError('OIDC_DISCOVERY_URL needs OIDC_ISSUER and an HTTPS or private development URL.')
+        # RFC 6749 scope tokens; the ID token itself requires the openid scope.
+        scopes = self.oidc_scopes.split(' ')
+        if 'openid' not in scopes or not all(re.fullmatch(r'[\x21\x23-\x5b\x5d-\x7e]+', scope) for scope in scopes):
+            raise ValueError('OIDC_SCOPES must be space-separated scopes including openid.')
+        return self
+
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret)
+
+    def oidc_discovery(self) -> str:
+        return self.oidc_discovery_url or self.oidc_issuer.rstrip('/') + '/.well-known/openid-configuration'
+
     def broker_environment(self, token: str) -> dict[str, str]:
         # Explicit empty values remove stale credentials on reused sandboxes.
         return {'WORKSPACE_RUN_TOKEN': token,
@@ -168,15 +210,28 @@ class Settings(BaseSettings):
                 'WORKSPACE_ACCESS_CLIENT_SECRET': self.cloudflare_access_client_secret}
 
     def person_login_enabled(self) -> bool:
-        return self.google_enabled() or self.cloudflare_access_login
+        return self.google_enabled() or self.oidc_enabled() or self.cloudflare_access_login
 
     workspace_password: str = ""
     workspace_member_password: str = ""
     password_login_enabled: bool = True
     google_client_id: str = ""
     google_client_secret: str = ""
-    google_allowed_domains: str = "berri.ai"
-    google_admin_emails: str = ""
+    # Organization eligibility for every individual sign-in method. The GOOGLE_*
+    # names remain accepted for existing deployments; the generic names win.
+    google_allowed_domains: str = Field(default="berri.ai", validation_alias=AliasChoices(
+        'ALLOWED_EMAIL_DOMAINS', 'GOOGLE_ALLOWED_DOMAINS', 'google_allowed_domains'))
+    google_admin_emails: str = Field(default="", validation_alias=AliasChoices(
+        'ADMIN_EMAILS', 'GOOGLE_ADMIN_EMAILS', 'google_admin_emails'))
+    # One standards-compliant OpenID Connect provider beside Google, such as Keycloak.
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = Field(default="", repr=False)
+    oidc_scopes: str = "openid email profile"
+    # Completes "Continue with …" on the sign-in button.
+    oidc_display_name: str = Field(default="SSO", min_length=1, max_length=40)
+    # Server-side discovery when the provider's public origin is unreachable here.
+    oidc_discovery_url: str = ""
     organization_name: str = Field(default="Internal team", min_length=1, max_length=80)
     session_secret: str = ""
     encryption_key: str = ""

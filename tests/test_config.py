@@ -188,3 +188,34 @@ def test_lens_feedback_target_derives_gateway_and_standalone_origins_and_honors_
 def test_lens_feedback_endpoint_requires_https_feedback_path_without_url_extras(endpoint):
     with pytest.raises(ValueError):
         Settings(_env_file=None, lens_feedback_endpoint=endpoint)
+
+
+ORGANIZATION_NAMES = ('ALLOWED_EMAIL_DOMAINS', 'GOOGLE_ALLOWED_DOMAINS', 'ADMIN_EMAILS', 'GOOGLE_ADMIN_EMAILS')
+
+
+def test_organization_settings_keep_google_names_and_default(monkeypatch):
+    for name in ORGANIZATION_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.google_domains() == {'berri.ai'} and settings.google_admins() == set()
+    monkeypatch.setenv('GOOGLE_ALLOWED_DOMAINS', 'Legacy.test')
+    monkeypatch.setenv('GOOGLE_ADMIN_EMAILS', 'Admin@Legacy.test')
+    settings = Settings(_env_file=None)
+    assert settings.google_domains() == {'legacy.test'} and settings.google_admins() == {'admin@legacy.test'}
+
+
+def test_generic_organization_names_win_within_one_source(monkeypatch, tmp_path):
+    monkeypatch.setenv('GOOGLE_ALLOWED_DOMAINS', 'legacy.test')
+    monkeypatch.setenv('GOOGLE_ADMIN_EMAILS', 'admin@legacy.test')
+    monkeypatch.setenv('ALLOWED_EMAIL_DOMAINS', 'generic.test')
+    monkeypatch.setenv('ADMIN_EMAILS', 'admin@generic.test')
+    settings = Settings(_env_file=None)
+    assert settings.google_domains() == {'generic.test'} and settings.google_admins() == {'admin@generic.test'}
+    # An explicit empty generic value is a deliberate choice, not a fallback.
+    monkeypatch.setenv('ADMIN_EMAILS', '')
+    assert Settings(_env_file=None).google_admins() == set()
+    # Source order is unchanged: the project .env still outranks the shell.
+    env = tmp_path / '.env'
+    env.write_text('GOOGLE_ALLOWED_DOMAINS=dotenv.test\n')
+    assert Settings(_env_file=env).google_domains() == {'dotenv.test'}
+    assert Settings(_env_file=None, google_allowed_domains='init.test').google_domains() == {'init.test'}

@@ -43,7 +43,7 @@ async function scenario(t, options = {}) {
       : json({ user: { id: "viewer", name: "Test viewer", role: "admin", individual: true },
         csrf: "test-csrf", models: ["test-model"], default_model: "test-model",
         product_mode: "standalone", preferences: { connection_ids: [], delivery_mode: "when_idle" } });
-    if (pathname === "/api/auth/config") return json({ mode: "standalone", password_enabled: true });
+    if (pathname === "/api/auth/config") return json({ mode: "standalone", password_enabled: true, google_enabled: false, access_enabled: false, providers: [] });
     if (pathname === "/api/history/sessions") {
       if (state.posts.length && options.sidebar) await options.sidebar.promise;
       if (state.posts.length && (typeof options.sidebarFailure === "function" ? options.sidebarFailure() : options.sidebarFailure)) {

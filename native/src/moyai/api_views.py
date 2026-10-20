@@ -43,11 +43,19 @@ class HealthStatus(ApiView):
     durability: str
 
 
+class SignInProvider(ApiView):
+    # Each id has its own generated start operation (startGoogleSignIn, startOidcSignIn).
+    id: Literal["google", "oidc"]
+    label: str
+
+
 class AuthConfig(ApiView):
     mode: Literal["existing", "standalone"]
     password_enabled: bool
+    # Kept for existing clients; the same as a "google" entry in providers.
     google_enabled: bool
     access_enabled: bool
+    providers: list[SignInProvider]
 
 
 class LoginResult(ApiView):

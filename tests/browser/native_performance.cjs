@@ -41,7 +41,7 @@ before(async () => {
         if (url.pathname === '/api/me') value = {
           user: {id: 'viewer', name: 'Test viewer', role: 'admin'}, csrf: 'fixture', models: ['test-model'],
         };
-        if (url.pathname === '/api/auth/config') value = {mode: 'standalone', password_enabled: true};
+        if (url.pathname === '/api/auth/config') value = {mode: 'standalone', password_enabled: true, google_enabled: false, access_enabled: false, providers: []};
         if (url.pathname === '/api/settings/performance') {
           requests++; value = report(url.searchParams.get('status') === 'failed');
         }

@@ -77,6 +77,7 @@ async def assembled_client(f, runtime, monkeypatch, *, sub=None, email="admin@ex
             "public_url": f.runtime.product.settings.public_url,
         }))
         patch.setattr(f.runtime.product, "google", SimpleNamespace(routes=APIRouter), raising=False)
+        patch.setattr(f.runtime.product, "oidc", SimpleNamespace(routes=APIRouter), raising=False)
         patch.setattr(f.runtime, "product_secrets", f.vault, raising=False)
         cookie, csrf = google_cookie(f.product.adapter, sub=sub or f.product.subject, email=email)
         async with httpx.AsyncClient(

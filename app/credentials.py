@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr, model_val
 from .database import Connection, DatabaseRow
 from .db import database, now
 from .identities import PROFILE_MAX_AGE_SECONDS
+from .identity_kinds import INDIVIDUAL_PREFIXES
 from .aws_login import AWSLogin, AWS_LOGIN_DESCRIPTION, login_required
 from app.aws_credentials import bundle as aws_bundle
 
@@ -453,7 +454,7 @@ class Credentials:
     def insert_secret(self, conn, body, user_id, admin, root_id='', *, authorized_native_root=None):
         if body.scope == 'organization' and not admin:
             raise HTTPException(403, 'Only an administrator can save organization credentials.')
-        if body.scope != 'organization' and not user_id.startswith(('google:', 'cloudflare:')) and not self.security.local_preview():
+        if body.scope != 'organization' and not user_id.startswith(INDIVIDUAL_PREFIXES) and not self.security.local_preview():
             raise HTTPException(403, 'Use Google sign-in to save personal credentials.')
         root_id = root_id or body.root_id if body.lifetime == 'session' else ''
         if body.lifetime == 'session' and not root_id:
@@ -1103,7 +1104,7 @@ class Credentials:
                 # An administrator can make a shared credential personal only to themselves.
                 values['owner_id'] = user_id
                 values['client_id'] = 'ownership-' + secret_id
-                if not user_id.startswith(('google:', 'cloudflare:')) and not self.security.local_preview():
+                if not user_id.startswith(INDIVIDUAL_PREFIXES) and not self.security.local_preview():
                     raise HTTPException(403, 'Use Google sign-in to save personal credentials.')
             if values['lifetime'] == 'session':
                 if not authorized_native_root or values['root_id'] != authorized_native_root:

@@ -29,6 +29,7 @@ NOT_JSON = {
     ("GET", "/api/uploads/{upload_id}"),
     ("GET", "/auth/github/register"),
     ("GET", "/auth/google/callback"),
+    ("GET", "/auth/oidc/callback"),
     ("POST", "/broker/native/v1/{route}"),
     ("POST", "/hooks/automations/{identity}"),
     ("POST", "/hooks/automations/{identity}/{provider}"),

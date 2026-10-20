@@ -818,6 +818,8 @@ class BillingReader:
         return await self.table(name, fields, fields)
 
     async def identity_links(self) -> tuple[IdentityLink, ...]:
+        from app.identity_kinds import INDIVIDUAL_KINDS
+
         users = await self.table("users", ("id", "kind", "linked_user_id", "link_method", "link_status"), ("id", "kind"))
         bound = self.max_records or MAX_RECORDS
         rows = list((await self.connection.execute(select(users).limit(bound + 1))).mappings())
@@ -828,7 +830,7 @@ class BillingReader:
             SourceRef("legacy", row["id"]),
             _source("legacy", row.get("linked_user_id")),
             row["kind"], str(row.get("link_method") or ""), str(row.get("link_status") or ""),
-            row["kind"] == "slack" and known.get(row.get("linked_user_id"), {}).get("kind") in {"google", "cloudflare"},
+            row["kind"] == "slack" and known.get(row.get("linked_user_id"), {}).get("kind") in INDIVIDUAL_KINDS,
         ) for row in rows)
 
     async def families(self, run_ids: Iterable[str]) -> dict[str, str]:

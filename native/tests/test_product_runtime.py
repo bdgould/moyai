@@ -63,3 +63,22 @@ async def test_distributed_runtime_and_database_share_one_late_bound_drain_servi
             assert runtime.product_drain.authority() is replacement_authority
     finally:
         await runtime.close()
+
+
+def test_auth_config_lists_each_configured_organization_provider():
+    from fastapi.testclient import TestClient
+
+    from moyai.openapi_dump import schema_app
+
+    with schema_app() as app:
+        settings = app.state.runtime.product.settings
+        client = TestClient(app)
+        assert client.get("/api/auth/config").json()["providers"] == []
+        settings.google_client_id, settings.google_client_secret = "synthetic-client", "synthetic-secret"
+        settings.oidc_issuer, settings.oidc_client_id = "https://idp.example.test/realms/moyai", "moyai"
+        settings.oidc_client_secret, settings.oidc_display_name = "synthetic-oidc-secret", "Keycloak"
+        config = client.get("/api/auth/config").json()
+        assert config["google_enabled"] is True
+        assert config["providers"] == [{"id": "google", "label": "Google"}, {"id": "oidc", "label": "Keycloak"}]
+        settings.oidc_client_secret = ""
+        assert client.get("/api/auth/config").json()["providers"] == [{"id": "google", "label": "Google"}]

@@ -2611,13 +2611,21 @@
           "password_enabled": {
             "title": "Password Enabled",
             "type": "boolean"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/SignInProvider"
+            },
+            "title": "Providers",
+            "type": "array"
           }
         },
         "required": [
           "mode",
           "password_enabled",
           "google_enabled",
-          "access_enabled"
+          "access_enabled",
+          "providers"
         ],
         "title": "AuthConfig",
         "type": "object"
@@ -16988,8 +16996,30 @@
         "title": "SettingsSkillList",
         "type": "object"
       },
+      "SignInProvider": {
+        "properties": {
+          "id": {
+            "enum": [
+              "google",
+              "oidc"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "SignInProvider",
+        "type": "object"
+      },
       "SignInRedirect": {
-        "description": "Where the browser goes next: Google's authorization page, or a local path.",
+        "description": "Where the browser goes next: the provider's authorization page, or a local path.",
         "properties": {
           "url": {
             "title": "Url",
@@ -19481,6 +19511,44 @@
     "/api/auth/google/start": {
       "post": {
         "operationId": "startGoogleSignIn",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignInRedirect"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start"
+      }
+    },
+    "/api/auth/oidc/start": {
+      "post": {
+        "operationId": "startOidcSignIn",
         "requestBody": {
           "content": {
             "application/json": {
@@ -26868,6 +26936,64 @@
     "/auth/google/callback": {
       "get": {
         "operationId": "callback_auth_google_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Error",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Callback"
+      }
+    },
+    "/auth/oidc/callback": {
+      "get": {
+        "operationId": "callback_auth_oidc_callback_get",
         "parameters": [
           {
             "in": "query",

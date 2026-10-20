@@ -164,6 +164,11 @@ balancer during this check. If Cloudflare Access protects the public origin,
 configure `CLOUDFLARE_ACCESS_CLIENT_ID` and `CLOUDFLARE_ACCESS_CLIENT_SECRET`
 with permission to reach the broker routes.
 
+Split installations can sign people in with Google or one generic OpenID Connect
+provider. Add those settings (`GOOGLE_*` or `OIDC_*`, with `ALLOWED_EMAIL_DOMAINS`
+and `ADMIN_EMAILS`) to `.env`; the helper does not prompt for them. See
+`docs/authentication.md` in the Moyai repository.
+
 These modes have different identity/schema contracts. Changing the topology
 variable or `COMPOSE_FILE` does not migrate an existing standalone installation
 into the split topology. Use a new installation or an explicitly verified

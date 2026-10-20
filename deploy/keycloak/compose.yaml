@@ -1,0 +1,44 @@
+# Local identity provider for developing generic OIDC sign-in. Synthetic users
+# and secrets only; never expose this realm beyond your own machine.
+# The `product` profile adds PostgreSQL and S3 for local-product.sh.
+name: moyai-keycloak
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.3@sha256:6a7217a100bd3e5de4063a27a538ef999a3c5a88c4b4ec0ffc0a642aee7b2597
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${MOYAI_KEYCLOAK_ADMIN_PASSWORD:-moyai-local-only}
+      # Tokens carry this browser-facing issuer. Calls from another container may
+      # use the service name (OIDC_DISCOVERY_URL); token and key endpoints then
+      # follow the requesting host while the issuer stays the same.
+      KC_HOSTNAME: http://localhost:${MOYAI_KEYCLOAK_PORT:-8080}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+    ports:
+      - "127.0.0.1:${MOYAI_KEYCLOAK_PORT:-8080}:8080"
+    volumes:
+      - ./moyai-realm.json:/opt/keycloak/data/import/moyai-realm.json:ro
+  postgres:
+    profiles: ["product"]
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    environment:
+      POSTGRES_USER: moyai
+      POSTGRES_PASSWORD: moyai-local-only
+      POSTGRES_DB: moyai_local
+    ports:
+      - "127.0.0.1:${MOYAI_LOCAL_POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moyai -d moyai_local"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  s3:
+    profiles: ["product"]
+    # In-memory S3-compatible store: stored objects disappear when it restarts.
+    image: motoserver/moto:5.1.4@sha256:32d7805d8bd4c81db789c4fff2c36f96a8837cbd8e7a3853116b6516b9490dde
+    ports:
+      - "127.0.0.1:${MOYAI_LOCAL_S3_PORT:-59000}:5000"
+volumes:
+  postgres-data:

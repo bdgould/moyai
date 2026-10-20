@@ -12,6 +12,7 @@ from uuid import uuid4
 from .database import PostgresDatabase, sqlite_connection, connection_scope
 from .attachments import Attachments
 from .blob_storage import ArtifactStore, ObjectStorage
+from .identity_kinds import CODE_FLOW_KINDS, INDIVIDUAL_KINDS, INDIVIDUAL_KINDS_SQL, oidc_user_id
 from .slack_mentions import SlackMentions
 from .scheduling_diagnostics import age_ms, record, slow_database
 
@@ -479,8 +480,8 @@ class Store:
     @staticmethod
     def session_view_owner_in(conn, user_id: str) -> str:
         """Resolve shared-workspace view links, never authentication or authorship."""
-        linked = conn.execute("""SELECT target.id FROM users source JOIN users target
-            ON target.id=source.linked_user_id AND target.kind IN ('google','cloudflare')
+        linked = conn.execute(f"""SELECT target.id FROM users source JOIN users target
+            ON target.id=source.linked_user_id AND target.kind IN {INDIVIDUAL_KINDS_SQL}
             WHERE source.id=? AND source.kind='slack'""", (user_id,)).fetchone()
         return linked['id'] if linked else user_id
 
@@ -607,7 +608,7 @@ class Store:
     def create_run(self, prompt: str, repo_url: str, mode: str, plugins: list[str], *, chat_enabled=False, model='', user_id='', attachment_ids=None, client_id=None, environment_id='auto', side_chat_of='', harness='hermes', github_repository_id=None, sandbox_provider=None, metadata_request=False, swarm_budget_seconds=None, durable_submit=None, swarm_bootstrap=None, received_at=None, private_owner_id=''):
         if private_owner_id:
             owners = self.rows('SELECT kind FROM users WHERE id=?', (private_owner_id,))
-            if private_owner_id != user_id or not owners or owners[0]['kind'] not in {'google', 'cloudflare'}:
+            if private_owner_id != user_id or not owners or owners[0]['kind'] not in INDIVIDUAL_KINDS:
                 raise ValueError('Private sessions require a verified individual owner.')
             if not chat_enabled or side_chat_of or swarm_budget_seconds is not None:
                 raise ValueError('Private sessions require a direct chat without derivation or swarms.')
@@ -945,10 +946,11 @@ class Store:
         """Only call with the server-verified session, never request JSON."""
         if info.get('method') == 'cloudflare':
             return self.access_identity(info['identity'])
-        if info.get('method') == 'google':
+        if info.get('method') in CODE_FLOW_KINDS:
             identity = info['identity']
-            user_id = 'google:' + identity['sub']
-            kind, email, name = 'google', identity['email'].strip().lower(), identity.get('name') or identity['email']
+            kind = info['method']
+            user_id = 'google:' + identity['sub'] if kind == 'google' else oidc_user_id(identity['issuer'], identity['sub'])
+            email, name = identity['email'].strip().lower(), identity.get('name') or identity['email']
         else:
             kind, email = 'shared', ''
             user_id = 'shared:' + info.get('method', 'password') + ':' + info.get('role', 'admin')
@@ -956,10 +958,17 @@ class Store:
         stamp = now()
         with self.connect() as conn:
             conn.begin_write()
+            if kind in CODE_FLOW_KINDS:
+                # Roles, memory and Slack links are keyed by email. An OIDC account
+                # never shares one with another person's account; review it instead.
+                others = conn.execute(f'SELECT kind FROM users WHERE kind IN {INDIVIDUAL_KINDS_SQL} AND email=? AND id<>?',
+                                      (email, user_id)).fetchall()
+                if any(kind == 'oidc' or row['kind'] == 'oidc' for row in others):
+                    raise ValueError('This sign-in email belongs to another account and requires administrator review.')
             old = conn.execute('SELECT email FROM users WHERE id=?', (user_id,)).fetchone()
             conn.execute('INSERT INTO users(id,kind,email,name,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET email=excluded.email,name=excluded.name,updated_at=excluded.updated_at',
                          (user_id, kind, email, name, stamp, stamp))
-            if kind == 'google':
+            if kind in CODE_FLOW_KINDS:
                 for value in {email, old['email'] if old else email}:
                     self.reconcile_email_in(conn, value)
         return user_id
@@ -977,7 +986,7 @@ class Store:
             WHERE binding.issuer=? AND binding.subject=?''', (identity['issuer'], identity['sub'])).fetchone()
         if not binding:
             return None
-        if (binding['kind'] not in {'google', 'cloudflare'}
+        if (binding['kind'] not in INDIVIDUAL_KINDS
                 or binding['access_email'] != identity['email'] or binding['user_email'] != identity['email']):
             raise ValueError('Access account mapping requires administrator review.')
         return binding['user_id']
@@ -1011,13 +1020,13 @@ class Store:
                                    (issuer, subject)).fetchone()
             if binding:
                 user = conn.execute('SELECT * FROM users WHERE id=?', (binding['user_id'],)).fetchone()
-                if (not user or user['kind'] not in {'google', 'cloudflare'}
+                if (not user or user['kind'] not in INDIVIDUAL_KINDS
                         or binding['email'] != email or user['email'] != email):
                     raise ValueError('Access account mapping requires administrator review.')
                 user_id = user['id']
                 conn.execute('UPDATE users SET updated_at=? WHERE id=?', (stamp, user_id))
             else:
-                matches = conn.execute("SELECT id FROM users WHERE kind IN ('google','cloudflare') AND email=?", (email,)).fetchall()
+                matches = conn.execute(f"SELECT id FROM users WHERE kind IN {INDIVIDUAL_KINDS_SQL} AND email=?", (email,)).fetchall()
                 if len(matches) > 1 or conn.execute('SELECT 1 FROM access_identities WHERE issuer=? AND email=?', (issuer, email)).fetchone():
                     raise ValueError('Access account mapping requires administrator review.')
                 if matches:
@@ -1035,12 +1044,12 @@ class Store:
     def reconcile_email_in(self, conn, email):
         """Accounting links only. Never authenticate a user or grant a role here.
 
-        The email must have come from a checked Slack profile or Google OIDC.
+        The email must have come from a checked Slack profile or a verified OIDC sign-in.
         Once bound, provider IDs stay authoritative; changes need admin review.
         """
         if not email or not self.auto_link_identities:
             return
-        google = conn.execute("SELECT id FROM users WHERE kind IN ('google','cloudflare') AND email=?", (email,)).fetchall()
+        google = conn.execute(f"SELECT id FROM users WHERE kind IN {INDIVIDUAL_KINDS_SQL} AND email=?", (email,)).fetchall()
         slack = conn.execute("SELECT * FROM users WHERE kind='slack' AND email=? AND profile_eligible=1", (email,)).fetchall()
         fresh_after = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         # Retain collision detection for older/deactivated Slack identities too:

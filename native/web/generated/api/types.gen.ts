@@ -1460,6 +1460,10 @@ export type AuthConfig = {
      * Password Enabled
      */
     password_enabled: boolean;
+    /**
+     * Providers
+     */
+    providers: Array<SignInProvider>;
 };
 
 /**
@@ -9593,9 +9597,23 @@ export type SettingsSkillList = {
 };
 
 /**
+ * SignInProvider
+ */
+export type SignInProvider = {
+    /**
+     * Id
+     */
+    id: 'google' | 'oidc';
+    /**
+     * Label
+     */
+    label: string;
+};
+
+/**
  * SignInRedirect
  *
- * Where the browser goes next: Google's authorization page, or a local path.
+ * Where the browser goes next: the provider's authorization page, or a local path.
  */
 export type SignInRedirect = {
     /**
@@ -11362,6 +11380,31 @@ export type StartGoogleSignInResponses = {
 };
 
 export type StartGoogleSignInResponse = StartGoogleSignInResponses[keyof StartGoogleSignInResponses];
+
+export type StartOidcSignInData = {
+    body: SignInStart;
+    path?: never;
+    query?: never;
+    url: '/api/auth/oidc/start';
+};
+
+export type StartOidcSignInErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type StartOidcSignInError = StartOidcSignInErrors[keyof StartOidcSignInErrors];
+
+export type StartOidcSignInResponses = {
+    /**
+     * Successful Response
+     */
+    200: SignInRedirect;
+};
+
+export type StartOidcSignInResponse = StartOidcSignInResponses[keyof StartOidcSignInResponses];
 
 export type ListConnectionsData = {
     body?: never;
@@ -15924,6 +15967,42 @@ export type CallbackAuthGoogleCallbackGetErrors = {
 export type CallbackAuthGoogleCallbackGetError = CallbackAuthGoogleCallbackGetErrors[keyof CallbackAuthGoogleCallbackGetErrors];
 
 export type CallbackAuthGoogleCallbackGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
+export type CallbackAuthOidcCallbackGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * State
+         */
+        state?: string;
+        /**
+         * Code
+         */
+        code?: string;
+        /**
+         * Error
+         */
+        error?: string;
+    };
+    url: '/auth/oidc/callback';
+};
+
+export type CallbackAuthOidcCallbackGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type CallbackAuthOidcCallbackGetError = CallbackAuthOidcCallbackGetErrors[keyof CallbackAuthOidcCallbackGetErrors];
+
+export type CallbackAuthOidcCallbackGetResponses = {
     /**
      * Successful Response
      */

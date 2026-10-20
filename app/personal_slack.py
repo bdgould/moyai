@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from .connector_errors import ConnectorError
 from .db import database
+from .identity_kinds import INDIVIDUAL_KINDS, INDIVIDUAL_KINDS_SQL
 from .security import digest
 
 LIMITATION = 'Personal Slack reads require your private web chat. Start a private chat, or disconnect personal Slack in Settings > Personal Slack to use organization access.'
@@ -62,7 +63,7 @@ class PersonalSlack:
                 raise ConnectorError('Sign in again with your individual work account.')
             return None
         user = rows[0]
-        if user['kind'] in {'google', 'cloudflare'}:
+        if user['kind'] in INDIVIDUAL_KINDS:
             if (not self.settings.person_login_enabled()
                     or user['email'].rpartition('@')[2] not in self.settings.google_domains()):
                 if self.configured(user['id']):
@@ -71,7 +72,7 @@ class PersonalSlack:
             return user['id']
         if user['kind'] == 'slack':
             match = self.same_requester or getattr(self.connectors.slack_identities, 'same_requester', None)
-            individuals = self.store.rows("SELECT id,email FROM users WHERE kind IN ('google','cloudflare')")
+            individuals = self.store.rows(f"SELECT id,email FROM users WHERE kind IN {INDIVIDUAL_KINDS_SQL}")
             candidates = [u['id'] for u in individuals if match and match(u['id'], actor)]
             if len(candidates) != 1:
                 # A never-linked Slack sender has no personal owner/grant.

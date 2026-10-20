@@ -1,0 +1,45 @@
+{
+  "realm": "moyai",
+  "enabled": true,
+  "displayName": "Moyai local",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "clients": [
+    {
+      "clientId": "moyai",
+      "name": "Moyai local workspace",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "moyai-local-oidc-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:8787/auth/oidc/callback", "http://127.0.0.1:8787/auth/oidc/callback"],
+      "webOrigins": ["http://localhost:8787", "http://127.0.0.1:8787"],
+      "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "+"},
+      "defaultClientScopes": ["openid", "email", "profile"]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin", "email": "admin@example.test", "emailVerified": true, "enabled": true,
+      "firstName": "Local", "lastName": "Admin",
+      "credentials": [{"type": "password", "value": "moyai-local-admin", "temporary": false}]
+    },
+    {
+      "username": "member", "email": "member@example.test", "emailVerified": true, "enabled": true,
+      "firstName": "Local", "lastName": "Member",
+      "credentials": [{"type": "password", "value": "moyai-local-member", "temporary": false}]
+    },
+    {
+      "username": "unverified", "email": "unverified@example.test", "emailVerified": false, "enabled": true,
+      "firstName": "Local", "lastName": "Unverified",
+      "credentials": [{"type": "password", "value": "moyai-local-unverified", "temporary": false}]
+    }
+  ]
+}

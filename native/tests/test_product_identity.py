@@ -448,6 +448,58 @@ async def test_cloudflare_requires_real_signed_assertion_and_existing_pinned_acc
         await adapter.authenticate(request(cookie, headers={"cf-access-jwt-assertion": token}))
 
 
+OIDC_ISSUER = "https://idp.example.test/realms/moyai"
+
+
+async def oidc_setup(product, **changes):
+    from app.identity_kinds import oidc_user_id
+
+    settings = product.settings.model_copy(update={
+        "oidc_issuer": OIDC_ISSUER, "oidc_client_id": "moyai", "oidc_client_secret": "synthetic-oidc-secret",
+        **changes,
+    })
+    adapter = ProductIdentityAdapter(settings, product.source)
+    account = oidc_user_id(OIDC_ISSUER, "oidc-sub")
+    async with product.writer.begin() as db:
+        await db.execute(text(
+            "INSERT INTO users VALUES (:id,'oidc','oidc@example.test','OIDC member',NULL,'created','updated') "
+            "ON CONFLICT(id) DO NOTHING"
+        ), {"id": account})
+    response = Response()
+    sid = adapter.legacy_security.new_session(response, "member", method="oidc", identity={
+        "sub": "oidc-sub", "issuer": OIDC_ISSUER, "email": "oidc@example.test", "domain": "example.test",
+        "name": "OIDC member",
+    })
+    cookie = SimpleCookie()
+    cookie.load(response.headers["set-cookie"])
+    return adapter, account, cookie["workspace_session"].value, adapter.legacy_security.csrf(sid)
+
+
+async def test_oidc_account_is_an_individual_scoped_to_its_issuer(product):
+    adapter, account, cookie, csrf = await oidc_setup(product)
+    principal = await adapter.authenticate(request(cookie))
+    assert principal.id == account and principal.method == "oidc" and principal.kind == "oidc"
+    assert principal.individual and principal.role == "member" and principal.csrf_token == csrf
+    # A changed issuer or client ends the session and every outstanding grant.
+    for change in ({"oidc_issuer": "https://idp.example.test/realms/next"}, {"oidc_client_id": "replacement"}):
+        moved, *_ = await oidc_setup(product, **change)
+        with pytest.raises(HTTPException) as denied:
+            await moved.authenticate(request(cookie))
+        assert denied.value.status_code == 401
+        with pytest.raises(HTTPException):
+            await moved.require_current(principal.grant)
+    disabled = ProductIdentityAdapter(product.settings, product.source)
+    with pytest.raises(HTTPException):
+        await disabled.require_current(principal.grant)
+
+
+async def test_enabling_oidc_keeps_existing_google_grants_current(product):
+    # A release that adds OIDC must not invalidate in-flight work for other accounts.
+    before = await product.adapter.current("google:admin-sub")
+    adapter, *_ = await oidc_setup(product)
+    assert (await adapter.require_current(before.grant)).id == "google:admin-sub"
+
+
 async def test_each_activity_attempt_checks_source_even_when_mirror_is_unchanged(product):
     principal = await product.adapter.current("google:admin-sub")
     mirror = {"id": principal.id, "role": "admin", "enabled": True}

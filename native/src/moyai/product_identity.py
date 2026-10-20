@@ -107,7 +107,9 @@ class ProductPrincipal:
 
     @property
     def individual(self) -> bool:
-        return self.kind in {"google", "cloudflare"} and self.method in {"google", "cloudflare"}
+        from app.identity_kinds import INDIVIDUAL_KINDS
+
+        return self.kind in INDIVIDUAL_KINDS and self.method in INDIVIDUAL_KINDS
 
     @property
     def grant(self) -> ProductGrant:
@@ -215,6 +217,8 @@ class ProductIdentityAdapter:
             return await read(session)
 
     async def _current(self, db: AsyncSession, user_id: str, controls: tuple[bool, int]) -> ProductPrincipal:
+        from app.identity_kinds import INDIVIDUAL_KINDS
+
         row = (await db.execute(
             text(f"SELECT * FROM {self._table('users')} WHERE id=:id"), {"id": user_id},
         )).mappings().first()
@@ -234,7 +238,7 @@ class ProductIdentityAdapter:
             return await self.slack_authority.current(db, dict(row), (enabled, controls[1]))
         revision = 0
         binding = None
-        if kind in {"google", "cloudflare"}:
+        if kind in INDIVIDUAL_KINDS:
             if not self.roles.eligible(email):
                 raise HTTPException(401, "The product account is outside the allowed organization.")
             if self.settings.cloudflare_access_login:
@@ -247,6 +251,8 @@ class ProductIdentityAdapter:
                     raise HTTPException(401, "The Access account mapping requires review.")
             elif kind == "google" and self.settings.google_enabled():
                 method = "google"
+            elif kind == "oidc" and self.settings.oidc_enabled():
+                method = "oidc"
             else:
                 raise HTTPException(401, "This product sign-in method is no longer enabled.")
             role, revision = await db.run_sync(
@@ -287,6 +293,9 @@ class ProductIdentityAdapter:
                 "password": self.settings.workspace_member_password if role == "member" else self.settings.workspace_password,
             },
         }
+        if kind == "oidc":
+            # Only OIDC accounts bind to the provider, so other grants survive this release.
+            authority["policy"]["oidc"] = [self.settings.oidc_issuer, self.settings.oidc_client_id]
         version = hmac.new(
             self.legacy_security.secret.encode(),
             json.dumps(authority, sort_keys=True, separators=(",", ":")).encode(),
@@ -330,6 +339,7 @@ class ProductIdentityAdapter:
         Accounting/manual links alone are deliberately not an authentication path.
         """
         from app.identities import PROFILE_MAX_AGE_SECONDS
+        from app.identity_kinds import INDIVIDUAL_KINDS_SQL
 
         if not self.settings.person_login_enabled():
             return None
@@ -348,7 +358,7 @@ class ProductIdentityAdapter:
         if not 0 <= age < PROFILE_MAX_AGE_SECONDS or not self.roles.eligible(actor["email"]):
             return None
         owners = (await db.execute(text(
-            f"SELECT id FROM {self._table('users')} WHERE kind IN ('google','cloudflare') AND email=:email",
+            f"SELECT id FROM {self._table('users')} WHERE kind IN {INDIVIDUAL_KINDS_SQL} AND email=:email",
         ), {"email": actor["email"]})).scalars().all()
         if len(owners) != 1 or not (await self._native_controls(owners[0], db))[0]:
             return None
@@ -379,6 +389,7 @@ class ProductIdentityAdapter:
         from dataclasses import replace
 
         from app.cloudflare_access import AccessUnavailable
+        from app.identity_kinds import INDIVIDUAL_KINDS, oidc_user_id
         from jwt import PyJWTError
 
         # Ignore even prepopulated state: the assertion must be checked here.
@@ -432,10 +443,15 @@ class ProductIdentityAdapter:
             if not isinstance(subject, str) or not subject:
                 raise HTTPException(401, "Invalid product identity subject.")
             user_id = "google:" + subject
+        elif method == "oidc":
+            subject, issuer = info["identity"]["sub"], info["identity"]["issuer"]
+            if not isinstance(subject, str) or not subject or issuer != self.settings.oidc_issuer:
+                raise HTTPException(401, "Invalid product identity subject.")
+            user_id = oidc_user_id(issuer, subject)
         else:
             user_id = f"shared:{method}:{info['role']}"
         principal = await self.current(user_id)
-        if method in {"google", "cloudflare"} and principal.email != info["identity"]["email"].strip().lower():
+        if method in INDIVIDUAL_KINDS and principal.email != info["identity"]["email"].strip().lower():
             raise HTTPException(401, "The product identity mapping changed.")
         if principal.method != method:
             raise HTTPException(401, "The product sign-in method changed.")

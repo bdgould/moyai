@@ -35,9 +35,11 @@ async function handle(req,res,next) {
     res.writeHead(failure.status,{'Content-Type':failure.type||'text/plain','Cache-Control':'no-store'});
     res.end(failure.body??'Internal Server Error');return;
   }
-  if(url.pathname==='/api/auth/config')return json({mode:state.mode,password_enabled:state.password,google_enabled:state.google,access_enabled:state.access});
+  if(url.pathname==='/api/auth/config')return json({mode:state.mode,password_enabled:state.password,google_enabled:state.google,access_enabled:state.access,
+    providers:[...(state.google?[{id:'google',label:'Google'}]:[]),...(state.oidc?[{id:'oidc',label:state.oidcLabel||'SSO'}]:[])]});
   if(url.pathname==='/api/login'){state.signedIn=true;return json({csrf:'fixture-csrf'});}
   if(url.pathname==='/api/auth/google/start')return json({url:'https://accounts.google.com/fixture'});
+  if(url.pathname==='/api/auth/oidc/start')return json({url:state.oidcUrl||'http://localhost:18999/realms/moyai/protocol/openid-connect/auth?state=fixture'});
   if(url.pathname==='/api/logout'){state.signedIn=false;return json({signed_out:true});}
   if(!state.signedIn)return json({detail:'Sign in.'},401);
   if(url.pathname==='/api/me')return json({user:{id:'viewer',name:'Test viewer',role:'admin',individual:state.individual},csrf:'fixture-csrf',models:state.models||['test-model'],default_model:'test-model',product_mode:state.mode,preferences:state.preferences||{delivery_mode:'when_idle',connection_ids:null}});
@@ -2113,6 +2115,27 @@ test('capability-driven product/standalone login and shared session admission',a
   await waitFor(()=>state.requests.some(req=>req.path==='/api/sessions'&&req.method==='POST'));assert.equal(state.requests.find(req=>req.path==='/api/sessions'&&req.method==='POST').body.visibility,'shared');
   const login=state.requests.find(req=>req.path==='/api/login');assert.equal(login.body.username,undefined);
   reset({signedIn:false,mode:'standalone',google:false});await page.goto(base+'/');await page.getByLabel('Username',{exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Continue with Google'}).count(),0);
+});
+
+test('organization sign-in lists each configured provider and starts its own flow',async t=>{
+  reset({signedIn:false,individual:false,oidc:true,oidcLabel:'Keycloak'});
+  const page=await pageFor(t,'',1440,page=>page.route('http://localhost:18999/**',route=>route.fulfill({status:200,contentType:'text/html',body:'<title>Local provider</title>'})));
+  const google=page.getByRole('button',{name:'Continue with Google',exact:true}),oidc=page.getByRole('button',{name:'Continue with Keycloak',exact:true});
+  await oidc.waitFor();assert.equal(await google.count(),1);
+  assert.equal(await page.getByLabel('Workspace password',{exact:true}).evaluate(input=>input===document.activeElement),false);
+  await oidc.click();await page.waitForURL('http://localhost:18999/**');
+  assert.ok(state.requests.some(req=>req.path==='/api/auth/oidc/start'&&req.method==='POST'&&req.body.return_to==='/'));
+  assert.equal(state.requests.some(req=>req.path==='/api/auth/google/start'),false);
+});
+
+test('organization sign-in refuses plain HTTP outside loopback and reports an empty configuration',async t=>{
+  reset({signedIn:false,individual:false,google:false,oidc:true,oidcUrl:'http://idp.example.test/realms/moyai/auth'});
+  const page=await pageFor(t,'');await page.getByRole('button',{name:'Continue with SSO',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'The sign-in destination is invalid.'}).waitFor();
+  assert.equal(new URL(page.url()).origin,base);assert.equal(await page.getByRole('button',{name:'Continue with SSO',exact:true}).isEnabled(),true);
+  reset({signedIn:false,individual:false,google:false,password:false});await page.goto(base+'/');
+  await page.getByText('No sign-in method is enabled. Contact your workspace administrator.').waitFor();
+  assert.equal(await page.getByRole('button',{name:/^Continue with/}).count(),0);
 });
 
 for(const privateSession of [false,true])test(`individual home defaults to shared with private opt-in: ${privateSession}`,async t=>{

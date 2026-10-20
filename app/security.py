@@ -13,6 +13,7 @@ from starlette.requests import HTTPConnection
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from .config import Settings
+from .identity_kinds import CODE_FLOW_KINDS
 
 
 def digest(value: str) -> str:
@@ -84,6 +85,11 @@ class Security:
         if settings.google_enabled() and (not settings.google_domains() or not settings.google_admins()
                 or any(email.rpartition("@")[2] not in settings.google_domains() for email in settings.google_admins())):
             raise ValueError("Configure GOOGLE_ALLOWED_DOMAINS and GOOGLE_ADMIN_EMAILS in those domains.")
+        if settings.oidc_enabled() and (not settings.google_domains() or not settings.google_admins()
+                or any(email.rpartition("@")[2] not in settings.google_domains() for email in settings.google_admins())):
+            raise ValueError("Configure ALLOWED_EMAIL_DOMAINS and ADMIN_EMAILS in those domains.")
+        if settings.oidc_enabled() and not self.local and not settings.oidc_issuer.startswith("https://"):
+            raise ValueError("OIDC_ISSUER must use HTTPS for a remote workspace.")
         if not self.local and not settings.person_login_enabled() and (not settings.password_login_enabled or not settings.workspace_password):
             raise ValueError("Configure Google sign-in or WORKSPACE_PASSWORD before exposing the workspace.")
         if settings.workspace_password and len(settings.workspace_password) < 16:
@@ -112,12 +118,13 @@ class Security:
             if role not in {"admin", "member"} or not isinstance(info.get("sid"), str):
                 return None
             method = info.get("method", "password")
-            if method == "google":
+            if method in CODE_FLOW_KINDS:
                 identity = info.get("identity", {})
                 email, domain = identity.get("email", ""), identity.get("domain", "")
-                if (not self.settings.google_enabled() or domain not in self.settings.google_domains()
+                if (not self.person_provider_enabled(method) or domain not in self.settings.google_domains()
                         or email.rpartition("@")[2] != domain or not identity.get("sub")
-                        or info.get("client_id") != self.settings.google_client_id):
+                        or info.get("client_id") != self.person_client_id(method)
+                        or (method == "oidc" and identity.get("issuer") != self.settings.oidc_issuer)):
                     return None
                 role = self.google_role(email)
             elif method == "local":
@@ -211,11 +218,19 @@ class Security:
         if request.headers.get("origin") != self.origin:
             raise HTTPException(403, "This request must come from the workspace.")
 
-    def new_session(self, response, role: str = "admin", *, identity: dict | None = None, local: bool = False) -> str:
+    def person_provider_enabled(self, method: str) -> bool:
+        return self.settings.oidc_enabled() if method == "oidc" else self.settings.google_enabled()
+
+    def person_client_id(self, method: str) -> str:
+        # Pinned in the session: changing the provider's client signs everyone out.
+        return self.settings.oidc_client_id if method == "oidc" else self.settings.google_client_id
+
+    def new_session(self, response, role: str = "admin", *, identity: dict | None = None, local: bool = False,
+                    method: str = "google") -> str:
         sid = secrets.token_urlsafe(32)
-        info = {"sid": sid, "role": role, "method": "google" if identity else "local" if local else "password"}
+        info = {"sid": sid, "role": role, "method": method if identity else "local" if local else "password"}
         if identity:
-            info.update(identity=identity, client_id=self.settings.google_client_id)
+            info.update(identity=identity, client_id=self.person_client_id(method))
         elif role == "member":
             info["password_tag"] = digest(self.settings.workspace_member_password)
         self.set_session_cookie(response, info)

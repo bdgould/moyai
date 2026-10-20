@@ -105,6 +105,25 @@ def test_split_configuration_reuses_all_authority_keys_but_selects_each_role(ins
     assert all(config.native_encryption_key.get_secret_value() != state["secrets"]["ENCRYPTION_KEY"] for config in configs)
 
 
+def test_split_configuration_carries_generic_oidc_and_organization_settings(install_environment):
+    # Configured like Google: through the environment, not the install wizard.
+    install_environment.update(
+        MOYAI_INSTALL_TOPOLOGY="split", OIDC_ISSUER="https://idp.example.test/realms/moyai",
+        OIDC_CLIENT_ID="moyai", OIDC_CLIENT_SECRET="private-oidc-secret", OIDC_DISPLAY_NAME="Keycloak",
+        ALLOWED_EMAIL_DOMAINS="example.test", ADMIN_EMAILS="admin@example.test",
+    )
+    state, _ = prepared(install_environment)
+    values = configuration(install_environment, state, role="api")
+    # The initializer pins the GOOGLE_* names; the generic names still take precedence.
+    assert values["GOOGLE_ALLOWED_DOMAINS"] == ""
+    config = load_product_config(values)
+    assert config is not None
+    source = config.legacy_settings()
+    assert source.oidc_enabled() and source.oidc_display_name == "Keycloak"
+    assert source.google_domains() == {"example.test"} and source.google_admins() == {"admin@example.test"}
+    assert "private-oidc-secret" not in json.dumps(state) and "private-oidc-secret" not in repr(source)
+
+
 @pytest.mark.parametrize(("field", "changed"), [
     ("MOYAI_DATABASE_URL", "postgresql://user:password@other.example.test/moyai"),
     ("MOYAI_DATABASE_URL", "postgresql://user:password@localhost:5432/moyai?host=other.example.test"),

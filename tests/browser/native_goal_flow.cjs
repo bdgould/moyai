@@ -23,7 +23,7 @@ async function scenario(t,width=1440,light=false){
     const request=route.request(),p=new URL(request.url()).pathname;
     const json=(data,status=200)=>route.fulfill({json:data,status});
     if(p==='/api/me')return json({user:{id:'viewer',name:'Test viewer',role:'admin',individual:true},csrf:'test',models:['test-model'],default_model:'test-model',product_mode:'standalone',preferences:{connection_ids:[],delivery_mode:'when_idle'}});
-    if(p==='/api/auth/config')return json({mode:'standalone',password_enabled:true});
+    if(p==='/api/auth/config')return json({mode:'standalone',password_enabled:true,google_enabled:false,access_enabled:false,providers:[]});
     if(p==='/api/history/sessions')return json({sessions:[],ancestors:[],has_more:false,next_cursor:null});
     if(p==='/api/sessions'&&request.method()==='POST')return json(state.session);
     if(p==='/api/sessions/chat/messages'&&request.method()==='POST'){

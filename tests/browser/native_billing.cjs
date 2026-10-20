@@ -44,7 +44,7 @@ before(async () => {
           user: {id: 'viewer', name: 'Test viewer', role: 'admin'}, csrf: 'fixture',
           models: ['native-root'], product_mode: 'existing',
         };
-        if (url.pathname === '/api/auth/config') value = {mode: 'existing', password_enabled: true};
+        if (url.pathname === '/api/auth/config') value = {mode: 'existing', password_enabled: true, google_enabled: false, access_enabled: false, providers: []};
         if (url.pathname === '/api/settings/billing') {
           calls.push(url);
           value = invalid ? {total: {spend: '3.000000'}} :

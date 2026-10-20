@@ -15,7 +15,7 @@ import "@/theme.css"
 import "./style.css"
 import "./product-shell.css"
 import { ApiError, csrfToken, setCsrf } from "./api"
-import { getMe, listPullRequestStatuses, startGoogleSignIn, listSessionFolders, markSessionRead, type Me, type PullRequestStatus } from "./generated/api"
+import { getMe, listPullRequestStatuses, startGoogleSignIn, startOidcSignIn, listSessionFolders, markSessionRead, type Me, type PullRequestStatus, type SignInProvider } from "./generated/api"
 import { cancelQueuedTurn, createSession, createSessionAnswer, createSessionMessage, getAuthConfig, getSession, getSessionActivity, getSessionPlan, listConnections, listSessionMessages, listSessions, loginWithPassword, logout, retrySlackDelivery, steerQueuedTurn, stopSession, updateQueuedTurn, type AuthConfig, type ConnectionView, type PendingRequests as Pending, type PlanStep, type SessionDetail } from "./generated/api"
 import { listHistorySessions, searchHistory, type HistorySessionList, type SourcedHistorySession } from "./generated/api"
 import { downloadDebugTrace } from "./debug-trace"
@@ -410,11 +410,15 @@ function AppCommandPalette({ current, historicalId, productMode, ...props }: {
     onSetPinned={async (_row, pinned) => { if (current) await actions.edit(current, { pinned }, pinned ? "Session pinned." : "Session unpinned.") }} />
 }
 
+const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"])
+// A local identity provider (deploy/keycloak) may use plain HTTP, but only between loopback hosts.
+const localProvider = (url: URL) => url.protocol === "http:" && loopbackHosts.has(url.hostname) && loopbackHosts.has(location.hostname)
 function navigateAuth(value: string, sameOrigin = false) {
   const url = new URL(value, location.origin)
-  if (url.username || url.password || (sameOrigin ? url.origin !== location.origin : url.protocol !== "https:" && url.origin !== location.origin)) throw new Error("The sign-in destination is invalid.")
+  if (url.username || url.password || (sameOrigin ? url.origin !== location.origin : url.protocol !== "https:" && url.origin !== location.origin && !localProvider(url))) throw new Error("The sign-in destination is invalid.")
   location.assign(url.href)
 }
+const startSignIn = { google: startGoogleSignIn, oidc: startOidcSignIn } satisfies Record<SignInProvider["id"], unknown>
 function Login({ onLogin }: { onLogin: (me: Me) => void }) {
   const [config, setConfig] = useState<AuthConfig | null>(null)
   const [error, setError] = useState("")
@@ -429,11 +433,11 @@ function Login({ onLogin }: { onLogin: (me: Me) => void }) {
   return <main className="center"><section className="login" aria-labelledby="login-title">
     <h1 id="login-title">Welcome to Moyai</h1><p className="muted">Sign in to your workspace.</p>
     {!config && !error && <p role="status">Loading sign-in options…</p>}
-    {config?.google_enabled && <Button variant="outline" disabled={busy} onClick={async () => {
+    {config?.providers.map(provider => <Button key={provider.id} variant="outline" disabled={busy} onClick={async () => {
       setBusy(true); setError("")
-      try { const { data: result } = await startGoogleSignIn({ body: { return_to: "/" } }); navigateAuth(result.url) }
+      try { const { data: result } = await startSignIn[provider.id]({ body: { return_to: "/" } }); navigateAuth(result.url) }
       catch (reason) { setError(String(reason)); setBusy(false) }
-    }}>Continue with Google</Button>}
+    }}>Continue with {provider.label}</Button>)}
     {config?.password_enabled && <form className="login-password" onSubmit={async event => {
       event.preventDefault(); setBusy(true); setError("")
       const form = new FormData(event.currentTarget)
@@ -447,11 +451,11 @@ function Login({ onLogin }: { onLogin: (me: Me) => void }) {
       } catch (reason) { setError(String(reason)) } finally { setBusy(false) }
     }}>
       {config.mode === "standalone" && <label>Username<Input name="username" autoComplete="username" required autoFocus disabled={busy} /></label>}
-      <label>{config.mode === "existing" ? "Workspace password" : "Password"}<Input name="password" type="password" autoComplete="current-password" required autoFocus={config.mode === "existing" && !config.google_enabled} disabled={busy} /></label>
+      <label>{config.mode === "existing" ? "Workspace password" : "Password"}<Input name="password" type="password" autoComplete="current-password" required autoFocus={config.mode === "existing" && config.providers.length === 0} disabled={busy} /></label>
       <Button type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
     </form>}
     {config?.access_enabled && <><p>Your organization uses Cloudflare Access. Continue through your organization’s sign-in to open Moyai.</p><Button onClick={() => location.reload()}>Continue to workspace</Button></>}
-    {config && !config.password_enabled && !config.google_enabled && !config.access_enabled && <p>No sign-in method is enabled. Contact your workspace administrator.</p>}
+    {config && !config.password_enabled && config.providers.length === 0 && !config.access_enabled && <p>No sign-in method is enabled. Contact your workspace administrator.</p>}
     {error && <p className="error" role="alert">{error}</p>}
     {!config && error && <Button variant="outline" onClick={() => setRetry(value => value + 1)}>Retry sign-in options</Button>}
   </section></main>

@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from .db import database, now
 from .database import DatabaseError
+from .identity_kinds import INDIVIDUAL_KINDS, INDIVIDUAL_KINDS_SQL
 from .connector_errors import ConnectorError
 
 PROFILE_SCOPES = {'users:read', 'users:read.email'}
@@ -50,7 +51,7 @@ class SlackIdentities:
         if not actor and run and not run.get('chat_enabled'):
             actor = run.get('owner_id')
         rows = await database(self.store.rows, 'SELECT * FROM users WHERE id=?', (actor,)) if isinstance(actor, str) and actor else []
-        if not rows or rows[0]['kind'] not in {'google', 'cloudflare', 'slack'} or not run:
+        if not rows or rows[0]['kind'] not in (*INDIVIDUAL_KINDS, 'slack') or not run:
             raise ConnectorError('Slack identity requires an identified requester. Sign in with Google or message the bot in Slack.')
         user = rows[0]
         installation = await database(self.connectors.slack_installation)
@@ -102,7 +103,7 @@ class SlackIdentities:
             await self.checkpoints.flush()
         await database(self.check_requester, run, installation)
         # Re-read after provider awaits; historical/manual spend links alone never select a recipient.
-        google = await database(self.store.rows, "SELECT id FROM users WHERE kind IN ('google','cloudflare') AND email=?", (email,))
+        google = await database(self.store.rows, f"SELECT id FROM users WHERE kind IN {INDIVIDUAL_KINDS_SQL} AND email=?", (email,))
         matches = await database(candidates)
         if len(google) != 1 or google[0]['id'] != actor or len(matches) != 1:
             raise ConnectorError('Your Slack identity is ambiguous. Review the linked accounts before sending a DM.')

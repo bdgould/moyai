@@ -52,6 +52,7 @@ from .api_views import (
     SessionStopResult,
     SessionSummary,
     SessionUpdateResult,
+    SignInProvider,
     SlackDeliveryRetry,
     TurnFailureDetails,
     TurnView,
@@ -422,6 +423,12 @@ def create_app(runtime: Runtime | None = None, *, run_dispatcher: bool = True) -
     @app.get("/api/auth/config", operation_id="getAuthConfig")
     async def auth_config() -> AuthConfig:
         product = runtime.product
+        providers: list[SignInProvider] = []
+        if product is not None and not product.settings.cloudflare_access_login:
+            if product.settings.google_enabled():
+                providers.append(SignInProvider(id="google", label="Google"))
+            if product.settings.oidc_enabled():
+                providers.append(SignInProvider(id="oidc", label=product.settings.oidc_display_name))
         return AuthConfig(
             mode="existing" if product is not None else "standalone",
             password_enabled=bool(
@@ -432,6 +439,7 @@ def create_app(runtime: Runtime | None = None, *, run_dispatcher: bool = True) -
             google_enabled=bool(product and product.settings.google_enabled()
                                 and not product.settings.cloudflare_access_login),
             access_enabled=bool(product and product.settings.cloudflare_access_login),
+            providers=providers,
         )
 
     @app.get("/api/me", operation_id="getMe")

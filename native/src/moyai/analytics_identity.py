@@ -65,6 +65,7 @@ async def report_identities(runtime: Any) -> ReportIdentities:
     identity = getattr(runtime, "product_identity", None)
     if identity is None:
         return ReportIdentities({}, list(users.values()))
+    from app.identity_kinds import INDIVIDUAL_KINDS
 
     async with identity._reader(identity.source_engine) as db:
         source = (await db.execute(text(
@@ -91,7 +92,7 @@ async def report_identities(runtime: Any) -> ReportIdentities:
         # Match existing product accounting semantics: retain established links
         # for historical attribution even when a profile later needs review.
         # Neither a name/email match nor a link to another Slack account suffices.
-        if person["kind"] == "slack" and target is not None and target["kind"] in {"google", "cloudflare"}:
+        if person["kind"] == "slack" and target is not None and target["kind"] in INDIVIDUAL_KINDS:
             person = target
         canonical = person["id"]
         product_ids.add(canonical)
